@@ -36,9 +36,17 @@ def completion(message, model="", system_prompt="", image_paths=None, temperatur
     if not api_key:
         logger.error("Please set the OPENAI_API_KEY environment variables")
         exit(1)
+    
+    # 获取API基础URL
     base_url = os.getenv("OPENAI_API_BASE")
+    # 确保base_url不包含models路径
+    if base_url and '/models' in base_url:
+        base_url = base_url.split('/models')[0]
+    
     if not base_url:
-        base_url = "https://api.openai.com/v1/"
+        base_url = "https://api.openai.com"
+        
+    logger.info(f"Using API base URL: {base_url}")
     
     # If no model is specified, use the default model
     if not model:
@@ -79,28 +87,67 @@ Please read the content in the image and transcribe it into plain Markdown forma
     return response
 
 if __name__ == "__main__":
+    # 检查命令行参数
+    help_msg = "Usage: python main.py [input.pdf] [output.md] [start_page] [end_page]\n" \
+               "   or: python main.py [start_page] [end_page] < input.pdf"
+    
+    input_path = None
+    output_path = None
     start_page = 1
     end_page = 0
-    if len(sys.argv) > 2:
-        start_page = int(sys.argv[1])
-        end_page = int(sys.argv[2])
-    elif len(sys.argv) > 1:
-        start_page = 1
-        end_page = int(sys.argv[1])
-
-    # Read binary data from standard input
-    input_data = sys.stdin.buffer.read()
-    if not input_data:
-        logger.error("No input data received")
-        logger.error("Usage: python main.py [start_page] [end_page] < path_to_input.pdf")
-        exit(1)
+    
+    # 解析命令行参数
+    if len(sys.argv) >= 2:
+        # 尝试判断第一个参数是文件路径还是页码
+        if os.path.isfile(sys.argv[1]) or sys.argv[1].endswith('.pdf'):
+            # 文件路径模式
+            input_path = sys.argv[1]
+            
+            if len(sys.argv) >= 3:
+                # 检查第二个参数是输出文件还是页码
+                if sys.argv[2].endswith('.md'):
+                    output_path = sys.argv[2]
+                    if len(sys.argv) >= 4:
+                        start_page = int(sys.argv[3])
+                    if len(sys.argv) >= 5:
+                        end_page = int(sys.argv[4])
+                else:
+                    # 第二个参数是起始页码
+                    start_page = int(sys.argv[2])
+                    if len(sys.argv) >= 4:
+                        end_page = int(sys.argv[3])
+        else:
+            # 标准输入模式，参数是页码
+            try:
+                start_page = int(sys.argv[1])
+                if len(sys.argv) >= 3:
+                    end_page = int(sys.argv[2])
+            except ValueError:
+                logger.error("Invalid page number")
+                logger.error(help_msg)
+                exit(1)
+    
+    # 处理输入
+    input_data = None
+    if input_path:
+        # 从文件读取
+        with open(input_path, 'rb') as f:
+            input_data = f.read()
+            input_filename = os.path.basename(input_path)
+    else:
+        # 从标准输入读取
+        input_data = sys.stdin.buffer.read()
+        if not input_data:
+            logger.error("No input data received")
+            logger.error(help_msg)
+            exit(1)
+        input_filename = os.path.basename(sys.stdin.buffer.name)
 
     # Create output directory
     output_dir = f"output/{time.strftime('%Y%m%d%H%M%S')}"
     os.makedirs(output_dir, exist_ok=True)
 
     # Try to get extension from file name
-    input_filename = os.path.basename(sys.stdin.buffer.name)
     input_ext = os.path.splitext(input_filename)[1]
     
     # If there is no extension or the file comes from standard input, try to determine the type by file content
@@ -125,13 +172,13 @@ if __name__ == "__main__":
             logger.error("Unsupported file type")
             exit(1)
     
-    input_path = os.path.join(output_dir, f"input{input_ext}")
-    with open(input_path, "wb") as f:
+    temp_input_path = os.path.join(output_dir, f"input{input_ext}")
+    with open(temp_input_path, "wb") as f:
         f.write(input_data)
 
     # create file worker
     try:
-        worker = create_worker(input_path, start_page, end_page)
+        worker = create_worker(temp_input_path, start_page, end_page)
     except ValueError as e:
         logger.error(str(e))
         exit(1)
@@ -148,9 +195,16 @@ if __name__ == "__main__":
         markdown += convert_image_to_markdown(img_path)
         markdown += "\n\n"
     logger.info("Image conversion to Markdown completed")
+    
     # Output Markdown
-    print(markdown)
-    # Remote output path
+    if output_path:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(markdown)
+        logger.info(f"Markdown saved to {output_path}")
+    else:
+        print(markdown)
+    
+    # Remove output path
     shutil.rmtree(output_dir)
     exit(0)
     

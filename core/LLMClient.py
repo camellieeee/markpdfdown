@@ -15,11 +15,26 @@ class LLMClient:
         :param api_key: OpenAI API key
         :param model: Name of the model to use
         """
-        self.base_url = base_url
         self.api_key = api_key
         self.model = model
+        
+        # 确保base_url不包含模型路径
+        if '/models' in base_url:
+            base_url = base_url.split('/models')[0]
+        
+        # 确保base_url不以/v1结尾
+        if base_url.endswith('/v1'):
+            self.base_url = base_url
+        elif base_url.endswith('/'):
+            self.base_url = base_url + 'v1'
+        else:
+            self.base_url = base_url + '/v1'
+            
+        # 记录最终使用的base_url
+        logger.info(f"Using API base URL: {self.base_url}")
+        
         self.client = openai.OpenAI(
-                base_url=base_url,
+                base_url=self.base_url,
                 api_key=api_key
             )
         
@@ -51,7 +66,9 @@ class LLMClient:
                 base64_image = self.encode_image(img_path)
                 user_content.append({
                     "type": "image_url",
-                    "image_url": f"data:image/jpeg;base64,{base64_image}"
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_image}"
+                    }
                 })
 
         messages = [
